@@ -1,179 +1,164 @@
-import copy, math
-from tqdm import tqdm
+import os
+import time
+from argparse import ArgumentParser
+from pathlib import Path
+from utils.LoggerConfig import init_logger
+import yaml
+import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import random
-import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix, precision_score, recall_score
+from preprocessing.data_preprocess import *
+from models.model import PatchEncoder
+from models.train_model import train_model
+from torch.utils.tensorboard import SummaryWriter
+from utils.testplot import log_signal_with_gt_anomaly
+
+
+import pandas as pd
+
+
+from preprocessing.data_preprocess import *
 from utils.utils import *
+from utils.evaluation import *
 
 
-def train_model(model, train_loader, train_patches, device, num_iter=200, pretext_step=64,
-                lr=1e-4, see_loss=None):
+class TrainAnomalyDetection:
+    """
+    训练异常检测模型
 
-    # fixed hyperparams in PaAno
-    radius = 2
-    lambda_weight = 1
-    temperature = 1.0
-    num_rand_patches = 5
-    initial_lr = lr
-    final_lr = lr / 10
+    Args:
+        config: 配置字典
+    """
+    def __init__(self, config:dict, device=None):
+        # 获取参数
+        self.config = config
+        self.date_file = self.config['dataset']["date_file"]
+        self.patch_size = self.config['dataset']["patch_size"]
+        self.batch_size = self.config['model']["batch_size"]
+        self.in_channels = self.config['model']["in_channels"]
+        self.log_dir = self.config['model']['log_dir']
+        self.num_iters = self.config['model']["num_iters"]
+        self.lr = float(self.config['model']["lr"])
+        self.base_dir = Path(__file__).parent
+        self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def cosine_annealed_lr(iteration):
-        t = min(iteration, num_iter)
-        cosine_factor = 0.5 * (1 + math.cos(math.pi * t / num_iter))
-        return final_lr + (initial_lr - final_lr) * cosine_factor
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=initial_lr, weight_decay=1e-4)
-    pos_weight = torch.tensor([1.0]).to(device)
-    criterion_pretext = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction='none')
+    def loaddateset(self):
+        # 拼接路径
+        file_path = self.base_dir.joinpath(self.date_file)
+        # 加载数据集
+        # train_data, train_labels, test_data, test_labels = load_and_split_data(file_path)
+        train_data, train_labels, test_data, test_labels = load_npz_data(file_path)
+        # 转换数据类型
+        train_data = np.array(train_data, dtype=np.float32) 
+        test_data = np.array(test_data, dtype=np.float32)
+        test_labels = np.array(test_labels, dtype=np.float32)
+        logger.info(f"训练数据大小: {train_data.shape}, 测试数据大小: {test_data.shape}")
 
-    iteration_count = 0
-    best_loss = float('inf')
-    best_model_wts = copy.deepcopy(model.state_dict())
+        # dataloader
+        patch_creator = PatchCreator(L=self.patch_size, s=1)
+        train_loader, test_loader, true_test_labels = patch_creator.create_dataloaders(
+                train_data, test_data, test_labels, batch_size=self.batch_size)
+        # 打印train_loader和test_loader的信息
+        logger.info(f"训练集批数量: {len(train_loader)}, 测试集数量: {len(test_loader)}")
+        logger.info(f"训练集的batch_size: {train_loader.batch_size}, 测试集的batch_size: {test_loader.batch_size}")
+        x, y = next(iter(test_loader))
+        logger.info(f"x.shape: {x.shape}, y.shape: {y.shape}")
 
-    print("    [Training Info]")
-    pbar = tqdm(total=num_iter, desc="    >> Training", ncols=80)
+        return train_loader, test_loader, true_test_labels, train_data, test_data
 
-    _offsets = torch.tensor([*range(-radius, 0), *range(1, radius + 1)], dtype=torch.long)
+    def train(self):
+        train_loader, test_loader, true_test_labels, train_data, test_data = self.loaddateset()
+        model = PatchEncoder(in_channels=self.in_channels, use_revin=True).to(self.device)
+        logger.info(f"模型初始化完成， 打印相关信息...")
+        logger.info(model)
+        total_params = sum(p.numel() for p in model.parameters()) 
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad) 
+        logger.info(f"模型参数数量: {total_params:,}")
+        logger.info(f"模型可训练参数数量: {trainable_params:,}")
 
-    while iteration_count < num_iter:
-        for batch_data, batch_indexes in train_loader:
-            if iteration_count >= num_iter:
-                break
+        writer = SummaryWriter(self.log_dir)
 
-            iteration_count += 1
+        train_model(
+                model, 
+                train_loader, 
+                preprocess_to_patches(train_data, patch_size=self.patch_size, stride=1), 
+                self.device, 
+                num_iter=self.num_iters, 
+                pretext_step=self.patch_size, 
+                lr=self.lr, 
+                writer=writer)
+        
+        # logger.info(f"模型训练完成，重新加载模型参数...")
+        # model.load_state_dict(torch.load("best_trained_encoder.pth", map_location=self.device))
+        # 获取记忆力库
+        memory_bank, indices_tensor = create_memory_bank(model, train_loader, self.device, num_cores=0.0001)
+        writer.add_embedding(memory_bank, metadata=indices_tensor, tag="memory_bank")
+        # 保存memory_bank
+        t0 = time.time()
+        torch.save(memory_bank, "memory_bank.pth")
+        logger.info("保存memory_bank完成，耗时 %.3f 秒", time.time() - t0)
 
-            # Update LR
-            lr = cosine_annealed_lr(iteration_count)
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr
+        # logger.info(f"加载memory_bank..")
+        # memory_bank = torch.load("memory_bank.pth", map_location=self.device)
+        # logger.info(f"加载memory_bank完成，shape: {memory_bank.shape}")
 
-            batch_data = batch_data.to(device, non_blocking=True)
-            batch_indexes = batch_indexes.squeeze()  # (M,)
-            anchors = batch_data
-            M = batch_data.shape[0]
-            mu = 1 if batch_data.shape[1] != 1 else 10
-            total_len = len(train_patches)
+        
+        
 
-            # positives 
-            _cand = batch_indexes.view(-1, 1) + _offsets.view(1, -1)      # (M, 2r)
-            _valid = (_cand >= 0) & (_cand < total_len)
-            _noise = torch.rand_like(_cand.float())
-            _score = torch.where(_valid, _noise, torch.full_like(_noise, -1.0))
-            _choice = _score.argmax(dim=1)                                # (M,)
-            _pos_idx = _cand.gather(1, _choice.view(-1, 1)).squeeze(1)    # (M,)
-            _none_valid = _valid.sum(dim=1) == 0
-            if _none_valid.any():
-                _pos_idx[_none_valid] = batch_indexes[_none_valid]
-            positives = torch.stack([train_patches[i] for i in _pos_idx.tolist()], dim=0).to(device, non_blocking=True)
+        # 计算异常分数
+        all_scores = calculate_anomaly_scores(model, test_loader, memory_bank, top_k=3, device=self.device)
+         
+            # 获取点级别的异常分数
+        dist_scores = distribute_patch_scores_to_points(all_scores, patch_size=self.patch_size, num_points=len(true_test_labels))
+        # 可视化测试集结果
+        # log_signal_with_gt_anomaly(writer, test_data, dist_scores, true_test_labels, step=0)
 
-            if iteration_count < (num_iter / 10) :
-                current_lambda_pretext = lambda_weight * (1 - (iteration_count / (num_iter / 10)))
-            else:
-                current_lambda_pretext = 0.0
+        #将异常分数保存到csv中
+        df = pd.DataFrame({
+            'Data': test_data,          
+            'True Labels': true_test_labels,
+            'Anomaly scores': dist_scores,
+        })
 
-            if current_lambda_pretext > 0.0:
-                # pretext_patches 
-                pretext_patches = []
-                pretext_valid_mask = []
+        file_name = os.path.splitext(self.date_file)[0] # 去掉扩展名
+        output_file_path = os.path.join(self.base_dir, f"{file_name}_scores.csv")
+        logger.info(f"保存异常分数到csv文件: {output_file_path}")
+        df.to_csv(output_file_path, index=False)
+        logger.info(f"保存异常分数完成...")
 
-                _tgt = batch_indexes - pretext_step
-                _pre_mask = (_tgt >= 0) & (_tgt < total_len)
-                _tgt_clamped = _tgt.clamp(0, total_len - 1)
+        writer.close()
 
-                for i in range(M):
-                    if _pre_mask[i]:
-                        pretext_patches.append(train_patches[_tgt_clamped[i].item()].unsqueeze(0))
-                        pretext_valid_mask.append(True)
-                    else:
-                        pretext_patches.append(torch.zeros_like(train_patches[0].unsqueeze(0)))
-                        pretext_valid_mask.append(False)
 
-                pretext_patches = torch.cat(pretext_patches, dim=0).to(device, non_blocking=True)
-                pretext_valid_mask = torch.tensor(pretext_valid_mask, dtype=torch.bool, device=device)
 
-                # anchors + positives + pretext
-                all_patches = torch.cat([anchors, positives, pretext_patches], dim=0)
-                all_embeddings = model.embedding(all_patches)
+if __name__ == "__main__":
+    # log
+    logger = init_logger()
+    # 运行参数：配置文件
+    parser = ArgumentParser(description="Run PaAno Anomaly Detection")
+    parser.add_argument('--config', type=str, help="配置文件.",
+                        default=Path(__file__).parent.joinpath('configs', 'exampleconfig.yaml'))
+    args = parser.parse_args()
 
-                h_anchors = all_embeddings[:M]
-                h_pos     = all_embeddings[M:2*M]
-                h_pretext = all_embeddings[2*M:3*M]
+    logger.info(f"配置文件路径: {args.config}")
 
-            else:
-                pretext_patches    = None
-                pretext_valid_mask = None
+    # 从yaml获取配置参数
+    try:
+        with open(args.config, 'r') as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        logger.error(f"配置文件加载错误: {e}")
+        exit(1)
+    
+    logger.info(f"配置参数: {config}")
 
-                # anchors + positives
-                all_patches = torch.cat([anchors, positives], dim=0)
-                all_embeddings = model.embedding(all_patches)
+    experiment = TrainAnomalyDetection(config)
+    experiment.train()
+    
 
-                h_anchors = all_embeddings[:M]
-                h_pos     = all_embeddings[M:2*M]
+    
 
-            # triplet
-            z_anchor = model.projection(h_anchors)
-            z_pos    = model.projection(h_pos)
 
-            z_anchor = F.normalize(z_anchor, dim=1)
-            z_pos    = F.normalize(z_pos, dim=1)
+    
+    
 
-            _sim_ap  = (z_anchor @ z_pos.T) / temperature         # (M, M)
-            pos_sims = _sim_ap.diag()                             # (M,)
-
-            _sim_ap_f = _sim_ap.clone()
-            _sim_ap_f.diagonal().fill_(+float('inf')) 
-            neg_dists = 1 - _sim_ap_f
-            hard_neg_dists, _ = torch.max(neg_dists, dim=1)
-
-            pos_dists = 1 - pos_sims
-            triplet_loss = F.relu(pos_dists - hard_neg_dists + 0.5).mean() / mu
-            triplet_loss = triplet_grad(triplet_loss)
-
-            # Pretext Task 
-            if current_lambda_pretext > 0.0:
-                h_pre = h_pretext[pretext_valid_mask]
-                h_anchor_pre = h_anchors[pretext_valid_mask]
-                h_concat_pre = torch.cat([h_anchor_pre, h_pre], dim=1)
-
-                all_indices = torch.arange(M, device=device)
-                anchor_indices = all_indices.repeat_interleave(num_rand_patches)
-                rand_offsets = torch.randint(1, M, (M * num_rand_patches,), device=device)
-                unadj_indices = (anchor_indices + rand_offsets) % M
-
-                h_unadj = h_anchors[unadj_indices]
-                h_anchor_unadj = h_anchors.repeat_interleave(num_rand_patches, dim=0)
-                h_concat_unadj = torch.cat([h_anchor_unadj, h_unadj], dim=1)
-
-                all_pretext_features = torch.cat([h_concat_pre, h_concat_unadj], dim=0)
-                all_pretext_labels = torch.cat([
-                    torch.ones(h_concat_pre.size(0), device=device),
-                    torch.zeros(h_concat_unadj.size(0), device=device)
-                ])
-
-                pretext_outputs = model.classification_head(all_pretext_features).squeeze(1)
-                pretext_loss_all = criterion_pretext(pretext_outputs, all_pretext_labels)
-
-                loss_pre = pretext_loss_all[:h_concat_pre.size(0)].mean()
-                loss_unadj = pretext_loss_all[h_concat_pre.size(0):].mean()
-                pretext_loss = loss_pre + loss_unadj
-            else:
-                pretext_loss = torch.tensor(0.0, device=device)
-
-            final_loss = triplet_loss + current_lambda_pretext * pretext_loss
-
-            optimizer.zero_grad(set_to_none=True)
-            final_loss.backward()
-            optimizer.step()
-
-            pbar.update(1)
-
-            if final_loss.item() < best_loss:
-                best_loss = final_loss.item()
-                best_model_wts = copy.deepcopy(model.state_dict())
-
-    pbar.close()
-    model.load_state_dict(best_model_wts)
-    torch.save(model.state_dict(), 'best_trained_encoder.pth')
+    

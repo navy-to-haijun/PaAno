@@ -1,0 +1,11 @@
+dataset:
+  date_file: "data/data/waveform2.npz"
+  # date_file: "data/example/405_UCR_id_103_Sensor_tr_2827_1st_5988.csv"
+  patch_size: 128
+
+model:
+  log_dir: "run/data/"
+  batch_size: 512
+  in_channels: 1
+  num_iters: 200
+  lr: 1e-4

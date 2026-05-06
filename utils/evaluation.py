@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+from tqdm import tqdm
 
 # Distance-based anomaly scoring 
 @torch.inference_mode()
@@ -11,11 +12,12 @@ def calculate_anomaly_scores(model, data_loader, memory_bank, device, top_k=3):
     memory_bank = F.normalize(memory_bank.to(device, dtype=torch.float32), dim=1, eps=1e-12)
 
 
-    for data, _ in data_loader:
+    for data, _ in tqdm(data_loader, desc="Anomaly Scoring", total=len(data_loader)):
         data = data.to(device, non_blocking=True, dtype=torch.float32)
         feats = model.embedding(data)  # (B, D)
+        # 异常清理
         feats = torch.nan_to_num(feats, nan=0.0, posinf=0.0, neginf=0.0)
-
+        # 归一化
         feats = F.normalize(feats, dim=1, eps=1e-12)
         feats = torch.nan_to_num(feats, nan=0.0, posinf=0.0, neginf=0.0)
 
