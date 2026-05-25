@@ -1,0 +1,9 @@
+pyvisa
+pyvisa-py
+websockets
+numpy
+matplotlib  
+
+
+
+# -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple

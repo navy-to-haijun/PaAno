@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RK3566 实时数据流 - WebGL 高性能看板</title>
+    <style>
+        :root {
+            --bg-color: #0d0e12;
+            --panel-bg: rgba(22, 24, 30, 0.85);
+            --text-color: #e3e4e6;
+            --theme-green: #00ffaa;
+            --theme-warn: #ffb800;
+            --theme-error: #ff4a4a;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--text-color);
+            overflow: hidden;
+        }
+
+        /* 画布全屏覆盖 */
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* 状态监控面板 */
+        .dashboard {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            background: var(--panel-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            min-width: 280px;
+            pointer-events: auto;
+        }
+
+        h3 {
+            margin: 0 0 12px 0;
+            font-size: 16px;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            background-color: var(--theme-warn);
+            box-shadow: 0 0 8px var(--theme-warn);
+        }
+
+        .status-dot.connected {
+            background-color: var(--theme-green);
+            box-shadow: 0 0 8px var(--theme-green);
+        }
+
+        .status-dot.disconnected {
+            background-color: var(--theme-error);
+            box-shadow: 0 0 8px var(--theme-error);
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin: 8px 0;
+            color: #a0a5b5;
+        }
+
+        .info-value {
+            font-family: "Courier New", Courier, monospace;
+            font-weight: bold;
+            color: var(--text-color);
+        }
+
+        .control-group {
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px dashed rgba(255, 255, 255, 0.1);
+        }
+
+        input[type="text"] {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            width: 140px;
+            font-size: 12px;
+        }
+
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        button:hover { background: #1d4ed8; }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard">
+        <h3>
+            <span>系统监控状态</span>
+            <span id="status-indicator" class="status-dot"></span>
+        </h3>
+        <div class="info-row">
+            <span>后端地址:</span>
+            <span class="info-value" id="info-target">-</span>
+        </div>
+        <div class="info-row">
+            <span>连接状态:</span>
+            <span class="info-value" id="info-status">初始化...</span>
+        </div>
+        <div class="info-row">
+            <span>渲染帧率 (FPS):</span>
+            <span class="info-value" id="info-fps" style="color: var(--theme-green)">0</span>
+        </div>
+        <div class="info-row">
+            <span>数据吞吐量:</span>
+            <span class="info-value" id="info-throughput">0 点/秒</span>
+        </div>
+        
+        <div class="control-group">
+            <div class="info-row">
+                <input type="text" id="ip-input" value="192.168.1.100" placeholder="RK3566 IP 地址">
+                <button id="connect-btn">手动连接</button>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="plot-canvas"></canvas>
+
+    <script type="module">
+        // 【已修正】引入新版 v2.0+ 的 WebGLLineStrip 代替旧版的 WebGLLine
+        import { WebGLPlot, WebGLLineStrip, ColorRGBA } from 'https://esm.sh/webgl-plot';
+
+        // --- 系统配置 ---
+        const CONFIG = {
+            defaultIP: '192.168.1.100',  // 默认 RK3566 IP 
+            port: 8765,                  // Python WebSocket 端口
+            maxPoints: 2000,             // 画布上同时展现的最大点数
+            lineColor: [0.0, 1.0, 0.6, 1.0]  // 亮绿色 [R,G,B,A]
+        };
+
+        // --- 运行状态 ---
+        let wglp, mainLine;
+        let ws = null;
+        let reconnectTimer = null;
+        let currentTargetIP = CONFIG.defaultIP;
+
+        // 性能统计指标
+        let fpsCount = 0;
+        let pointsCount = 0;
+        let lastStatsTime = performance.now();
+
+        // 获取 DOM 元素
+        const canvas = document.getElementById('plot-canvas');
+        const statusIndicator = document.getElementById('status-indicator');
+        const infoStatus = document.getElementById('info-status');
+        const infoTarget = document.getElementById('info-target');
+        const infoFps = document.getElementById('info-fps');
+        const infoThroughput = document.getElementById('info-throughput');
+        const ipInput = document.getElementById('ip-input');
+        const connectBtn = document.getElementById('connect-btn');
+
+        /**
+         * 1. 初始化 WebGL-Plot 引擎
+         */
+        function initWebGLPlot() {
+            // 适配视网膜高分屏，防止波形模糊
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = canvas.clientWidth * dpr;
+            canvas.height = canvas.clientHeight * dpr;
+
+            // 建立 WebGL 绘图上下文
+            wglp = new WebGLPlot(canvas);
+
+            // 【已修正】实例化新版的 WebGLLineStrip
+            const color = new ColorRGBA(...CONFIG.lineColor);
+            mainLine = new WebGLLineStrip(color, CONFIG.maxPoints);
+            wglp.addLine(mainLine);
+
+            // 分配固定的 X 轴坐标空间 [-1, 1]
+            for (let i = 0; i < CONFIG.maxPoints; i++) {
+                mainLine.setX(i, (i / CONFIG.maxPoints) * 2 - 1);
+                mainLine.setY(i, 0.0); // 初始 y 轴全部置零
+            }
+        }
+
+        /**

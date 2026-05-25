@@ -1,0 +1,30 @@
+# Python cache and packaging artifacts
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info
+*.egg-info/
+*.egg/
+
+# Local editor settings
+.vscode/
+
+# PaAno training data and runtime outputs
+PaAno-model/data/
+PaAno-model/run/
+
+# RK3588 runtime waveform captures
+Inference-rk3588/waveform_data_625M/
+
+# Model conversion artifacts
+torchtorknn/data/
+torchtorknn/*.onnx
+torchtorknn/*.rknn
+torchtorknn/*.log
+
+# Local dependency packages
+docker/*.whl

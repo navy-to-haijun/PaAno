@@ -1,0 +1,26 @@
+# 版本信息
+version: '1'
+# 服务：运行的容器
+services:
+  rknn_dev:
+    build:
+      context: .
+      dockerfile: dockerfile
+
+    image: rknn_toolkit2
+
+    container_name: rknn_dev
+    # 特权模式
+    privileged: true
+    # 网络模式：宿主机网络
+    network_mode: host
+    # 支持终端交互
+    stdin_open: true
+    tty: true
+    # 工作目录
+    working_dir: /workspace
+    # 挂载目录
+    volumes:
+      - E:/资料/智深/信号质量/PaAno:/workspace
+
+    command: /bin/bash
