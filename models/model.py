@@ -108,7 +108,7 @@ class PatchEncoder(nn.Module): #Simple 1D CNN with RevIN
         # 分类头 MLP
         self.classification_head = nn.Linear(self.layers[-1]*2, 1)
 
-    def forward(self, x, return_embedding=False, return_projection=False):
+    def forward(self, x, return_embedding=True, return_projection=False):
        
        # 可逆归一化
         if self.revin is not None:
@@ -118,12 +118,13 @@ class PatchEncoder(nn.Module): #Simple 1D CNN with RevIN
             x = block(x)
         # 池化
         h = self.fc_embedding(x).flatten(start_dim=1)  # (N, D)
-        # 返回卷积学习到的特征
-        if return_embedding:
-            return h
         # 返回投影头的输出
         if return_projection:
             return self.projection_head(h)
+        # 返回卷积学习到的特征
+        if return_embedding:
+            return h
+        
 
         raise ValueError("The forward method is not designed to handle classification directly.")
 

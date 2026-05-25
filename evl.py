@@ -86,25 +86,32 @@ class EvlAnomalyDetection:
         memory_bank = torch.load("memory_bank.pth", map_location=self.device)
         logger.info(f"加载memory_bank完成, shape: {memory_bank.shape}")
 
-        # 计算异常分数
-        all_scores = calculate_anomaly_scores(model, all_loader, memory_bank, top_k=3, device=self.device)
+        model.eval()
+
+        # 保存模型
+        torch.jit.trace(model, torch.randn(1, self.in_channels, self.patch_size).to(self.device)).save("trained_encoder.pt")
+        logger.info(f"保存模型完成...")
+        
+
+        # # 计算异常分数
+        # all_scores = calculate_anomaly_scores(model, all_loader, memory_bank, top_k=3, device=self.device)
          
-        # 获取点级别的异常分数
-        dist_scores = distribute_patch_scores_to_points(all_scores, patch_size=self.patch_size, num_points=len(all_labels))
+        # # 获取点级别的异常分数
+        # dist_scores = distribute_patch_scores_to_points(all_scores, patch_size=self.patch_size, num_points=len(all_labels))
 
 
-        #将异常分数保存到csv中
-        df = pd.DataFrame({
-            'Data': all_data,          
-            'True Labels': all_labels,
-            'Anomaly scores': dist_scores,
-        })
+        # #将异常分数保存到csv中
+        # df = pd.DataFrame({
+        #     'Data': all_data,          
+        #     'True Labels': all_labels,
+        #     'Anomaly scores': dist_scores,
+        # })
 
-        file_name = os.path.splitext(self.date_file)[0] # 去掉扩展名
-        output_file_path = os.path.join(self.base_dir, f"{file_name}_scores.csv")
-        logger.info(f"保存异常分数到csv文件: {output_file_path}")
-        df.to_csv(output_file_path, index=False)
-        logger.info(f"保存异常分数完成...")
+        # file_name = os.path.splitext(self.date_file)[0] # 去掉扩展名
+        # output_file_path = os.path.join(self.base_dir, f"{file_name}_scores.csv")
+        # logger.info(f"保存异常分数到csv文件: {output_file_path}")
+        # df.to_csv(output_file_path, index=False)
+        # logger.info(f"保存异常分数完成...")
 
 
 

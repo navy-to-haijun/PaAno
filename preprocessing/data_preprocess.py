@@ -3,7 +3,9 @@ import pandas as pd
 
 from utils.LoggerConfig import init_logger
 import torch
-from torch.utils.data import Dataset, DataLoader
+from pathlib import Path
+from torch.utils.data import Dataset, DataLoader, TensorDataset
+import os
 
 # import torch.nn.functional as F
 # 
@@ -36,6 +38,18 @@ def load_data(file_path) :
     except Exception as e:
         logger.error(f"读取文件时出错 {file_path}: {e}")
         return [], []
+
+def load_txt_data(file_dir):
+    """
+    读取TXT文件,循环读取文件下的所有txt文件:txt文件只有一列
+    """
+    data_list = []
+    for filename in os.listdir(file_dir):
+        if filename.endswith(".txt"):
+            with open(os.path.join(file_dir, filename), "r") as f:
+                data = np.array([float(line.strip()) for line in f])
+                data_list.append(data)
+    return np.concatenate(data_list)
 
 def load_npz_data(file_path):
     """
@@ -104,12 +118,13 @@ def load_and_split_data(file_path):
 
 
 def preprocess_to_patches(data, patch_size, stride):
+    # 对一段连续波形做滑动窗口切片。
     patches = []
     for i in range(0, len(data) - patch_size + 1, stride):
         patch = data[i:i + patch_size]
         patches.append(patch)
     
-    patches_array = np.array(patches)                      # (N, L) or (N, L, C)
+    patches_array = np.array(patches)                      # (N, L) 或 (N, L, C)
     t = torch.tensor(patches_array, dtype=torch.float32)
     if t.ndim == 2:                   # (N, L) -> (N, 1, L)
         t = t.unsqueeze(1).contiguous()
@@ -117,6 +132,56 @@ def preprocess_to_patches(data, patch_size, stride):
         t = t.permute(0, 2, 1).contiguous()
 
     return t    
+
+
+def load_txt_data_parts(data_dir, patch_size):
+    # 将示波器 txt 采集文件作为相互独立的波形片段读取。
+    data_path = Path(data_dir)
+    if not data_path.exists():
+        raise FileNotFoundError(f"Dataset path does not exist: {data_path}")
+
+    if data_path.is_file():
+        txt_files = [data_path]
+    else:
+        txt_files = sorted(p for p in data_path.iterdir() if p.is_file() and p.suffix.lower() == ".txt")
+
+    if not txt_files:
+        raise FileNotFoundError(f"No txt files found in: {data_path}")
+
+    data_parts = []
+    for file_path in txt_files:
+        # 当前数据集为每行一个电压采样值。
+        data = np.loadtxt(file_path, dtype=np.float32).squeeze()
+        if data.ndim == 0 or len(data) == 0:
+            raise ValueError(f"Txt data is empty or invalid: {file_path}")
+        if len(data) < patch_size:
+            raise ValueError(f"Data length {len(data)} is less than patch size {patch_size}: {file_path}")
+        data_parts.append(data)
+
+    logger.info(f"Training txt files: {len(data_parts)}")
+    logger.info(f"Training total points: {sum(len(data) for data in data_parts)}")
+    return data_parts
+
+
+def create_txt_patch_dataloader(data_dir, patch_size, batch_size=512, stride=1, shuffle=True):
+    data_parts = load_txt_data_parts(data_dir, patch_size)
+    # 先对每个文件单独切片，再合并，避免窗口跨越两次采集边界。
+    patches = torch.cat(
+        [preprocess_to_patches(data, patch_size=patch_size, stride=stride) for data in data_parts],
+        dim=0,
+    )
+    # train_model 需要每个 patch 携带相对顺序索引。
+    indices = torch.arange(len(patches), dtype=torch.long).unsqueeze(1)
+    loader = DataLoader(
+        TensorDataset(patches, indices),
+        batch_size=batch_size,
+        shuffle=shuffle,
+    )
+
+    logger.info(f"Training patches: {len(patches)}")
+    logger.info(f"Training batches: {len(loader)}")
+    logger.info(f"Training batch_size: {loader.batch_size}")
+    return loader, patches
 
 
 class _tsdataset(Dataset):
