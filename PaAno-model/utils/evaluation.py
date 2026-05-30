@@ -1,37 +1,33 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
-import numpy as np
-from tqdm import tqdm
 
 # Distance-based anomaly scoring 
 @torch.inference_mode()
-def calculate_anomaly_scores(model, data_loader, memory_bank, device, top_k=3):
-    
+def calculate_anomaly_scores(model, memory_bank, patches, device, top_k=3):
     model.eval()
-    all_scores = []
+    # 归一化memory_bank
     memory_bank = F.normalize(memory_bank.to(device, dtype=torch.float32), dim=1, eps=1e-12)
 
+    patches = patches.to(device, dtype=torch.float32)
+    # 推理
+    feats = model(patches)
+    # 异常清理
+    feats = torch.nan_to_num(feats, nan=0.0, posinf=0.0, neginf=0.0)
+    # 归一化
+    feats = F.normalize(feats, dim=1, eps=1e-12)
+    feats = torch.nan_to_num(feats, nan=0.0, posinf=0.0, neginf=0.0)
 
-    for data, _ in tqdm(data_loader, desc="Anomaly Scoring", total=len(data_loader)):
-        data = data.to(device, non_blocking=True, dtype=torch.float32)
-        feats = model.embedding(data)  # (B, D)
-        # 异常清理
-        feats = torch.nan_to_num(feats, nan=0.0, posinf=0.0, neginf=0.0)
-        # 归一化
-        feats = F.normalize(feats, dim=1, eps=1e-12)
-        feats = torch.nan_to_num(feats, nan=0.0, posinf=0.0, neginf=0.0)
+    # Cosine similarity & distance
+    sims = feats @ memory_bank.T                    # (B, M)(patch 数量 x memory_bank特征数量)
+    sims = torch.nan_to_num(sims, nan=-1.0, posinf=1.0, neginf=-1.0)
+    # 取 top-k 个最相似的 memory_bank 特征，计算平均距离作为异常分数。
+    topk_sim, _ = torch.topk(sims, k=top_k, dim=1, largest=True)
+    dists = 1.0 - topk_sim
+    scores = dists.mean(dim=1)
+    scores = torch.nan_to_num(scores, nan=1.0, posinf=1.0, neginf=0.0)
 
-        # Cosine similarity & distance
-        sims = feats @ memory_bank.T                    # (B, M)
-        sims = torch.nan_to_num(sims, nan=-1.0, posinf=1.0, neginf=-1.0)
-        topk_sim, _ = torch.topk(sims, k=top_k, dim=1, largest=True)
-        dists = 1.0 - topk_sim
-        scores = dists.mean(dim=1)
-
-        scores = torch.nan_to_num(scores, nan=1.0, posinf=1.0, neginf=0.0)
-        all_scores.extend(scores.cpu().tolist())
-
-    return all_scores
+    return scores.cpu().tolist()
 
 
 # Patch-to-point score distribution 

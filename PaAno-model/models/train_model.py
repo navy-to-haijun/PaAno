@@ -215,8 +215,8 @@ def train_model(model, train_loader, train_patches, device, writer: SummaryWrite
                 best_model_wts = copy.deepcopy(model.state_dict())
 
     pbar.close()
-    logger.info("保存模型")
-    best_model_wts_cpu = {k: v.cpu() for k, v in best_model_wts.items()}
-    t0 = time.time()
-    torch.save(best_model_wts_cpu, 'best_trained_encoder.pth')
-    logger.info("保存模型完成，耗时 %.3f 秒", time.time() - t0)
+    # logger.info("保存模型")
+    # best_model_wts_cpu = {k: v.cpu() for k, v in best_model_wts.items()}
+    # t0 = time.time()
+    # torch.save(best_model_wts_cpu, 'best_trained_encoder.pth')
+    # logger.info("保存模型完成，耗时 %.3f 秒", time.time() - t0)

@@ -118,7 +118,15 @@ def load_and_split_data(file_path):
 
 
 def preprocess_to_patches(data, patch_size, stride):
-    # 对一段连续波形做滑动窗口切片。
+    """
+    将数据切分为patch
+    Args:
+        data (numpy.ndarray): 输入数据
+        patch_size (int): 每个patch的长度
+        stride (int): 切片的步长
+    Returns:
+        torch.Tensor: 切分后的patch数据
+    """
     patches = []
     for i in range(0, len(data) - patch_size + 1, stride):
         patch = data[i:i + patch_size]
@@ -126,7 +134,7 @@ def preprocess_to_patches(data, patch_size, stride):
     
     patches_array = np.array(patches)                      # (N, L) 或 (N, L, C)
     t = torch.tensor(patches_array, dtype=torch.float32)
-    if t.ndim == 2:                   # (N, L) -> (N, 1, L)
+    if t.ndim == 2:                   # (N, L) -> (N, 1, L)(batch, channels, length)
         t = t.unsqueeze(1).contiguous()
     elif t.ndim == 3:                 # (N, L, C) -> (N, C, L)
         t = t.permute(0, 2, 1).contiguous()
@@ -135,6 +143,15 @@ def preprocess_to_patches(data, patch_size, stride):
 
 
 def load_txt_data_parts(data_dir, patch_size):
+    """
+    将每个txt文件单独切分，并生成patch数据集。
+    Args:
+        data_dir (str): 包含txt文件的目录路径
+        patch_size (int): 每个patch的长度
+    Returns:
+        data_parts (list): 每一个txt是列表的一个元素
+
+    """
     # 将示波器 txt 采集文件作为相互独立的波形片段读取。
     data_path = Path(data_dir)
     if not data_path.exists():
@@ -164,8 +181,18 @@ def load_txt_data_parts(data_dir, patch_size):
 
 
 def create_txt_patch_dataloader(data_dir, patch_size, batch_size=512, stride=1, shuffle=True):
+    """
+    对给定文件件中的txt文件进行预处理，生成patch数据集。
+    Args:
+        data_dir (str): 包含txt文件的目录路径
+        patch_size (int): 每个patch的长度
+        batch_size (int): DataLoader的批次大小
+        stride (int): 切片的步长
+        shuffle (bool): 是否打乱数据
+    """
+    # 获取训练数据
     data_parts = load_txt_data_parts(data_dir, patch_size)
-    # 先对每个文件单独切片，再合并，避免窗口跨越两次采集边界。
+    # 切片:
     patches = torch.cat(
         [preprocess_to_patches(data, patch_size=patch_size, stride=stride) for data in data_parts],
         dim=0,
@@ -266,83 +293,3 @@ class PatchCreator:
         all_loader = DataLoader(_tsdataset(all_patches, indices=all_indices), batch_size=batch_size, shuffle=True)
 
         return all_loader
-
-
-
-# # cited from https://github.com/TheDatumOrg/TSB-AD/blob/main/TSB_AD/utils/slidingWindows.py
-# from statsmodels.tsa.stattools import acf
-# from scipy.signal import argrelextrema
-# import numpy as np
-# from statsmodels.graphics.tsaplots import plot_acf
-
-# # determine sliding window (period) based on ACF
-# def find_length_rank(data, rank=1):
-#     """"
-#     自动寻找最优窗口长度
-#     """
-#     data = data.squeeze()
-#     if len(data.shape)>1: return 100 #0->100
-#     if rank==0: return 1
-#     data = data[:min(20000, len(data))]
-    
-#     base = 3
-#     auto_corr = acf(data, nlags=400, fft=True)[base:]
-    
-#     # plot_acf(data, lags=400, fft=True)
-#     # plt.xlabel('Lags')
-#     # plt.ylabel('Autocorrelation')
-#     # plt.title('Autocorrelation Function (ACF)')
-#     # plt.savefig('/data/liuqinghua/code/ts/TSAD-AutoML/AutoAD_Solution/candidate_pool/cd_diagram/ts_acf.png')
-
-#     local_max = argrelextrema(auto_corr, np.greater)[0]
-
-#     # print('auto_corr: ', auto_corr)
-#     # print('local_max: ', local_max)
-
-#     try:
-#         # max_local_max = np.argmax([auto_corr[lcm] for lcm in local_max])
-#         sorted_local_max = np.argsort([auto_corr[lcm] for lcm in local_max])[::-1]    # Ascending order
-#         max_local_max = sorted_local_max[0]     # Default
-#         if rank == 1: max_local_max = sorted_local_max[0]
-#         if rank == 2: 
-#             for i in sorted_local_max[1:]: 
-#                 if i > sorted_local_max[0]: 
-#                     max_local_max = i 
-#                     break
-#         if rank == 3:
-#             for i in sorted_local_max[1:]: 
-#                 if i > sorted_local_max[0]: 
-#                     id_tmp = i
-#                     break
-#             for i in sorted_local_max[id_tmp:]:
-#                 if i > sorted_local_max[id_tmp]: 
-#                     max_local_max = i           
-#                     break
-#         # print('sorted_local_max: ', sorted_local_max)
-#         # print('max_local_max: ', max_local_max)
-#         if local_max[max_local_max]<3 or local_max[max_local_max]>300:
-#             return 125
-#         return local_max[max_local_max]+base
-#     except:
-#         return 125
-    
-
-# # determine sliding window (period) based on ACF, Original version
-# def find_length(data):
-#     if len(data.shape)>1:
-#         return 0
-#     data = data[:min(20000, len(data))]
-    
-#     base = 3
-#     auto_corr = acf(data, nlags=400, fft=True)[base:]
-    
-    
-#     local_max = argrelextrema(auto_corr, np.greater)[0]
-#     try:
-#         max_local_max = np.argmax([auto_corr[lcm] for lcm in local_max])
-#         if local_max[max_local_max]<3 or local_max[max_local_max]>300:
-#             return 125
-#         return local_max[max_local_max]+base
-#     except:
-#         return 125
-

@@ -11,6 +11,7 @@ from models.train_model import train_model
 from preprocessing.data_preprocess import create_txt_patch_dataloader
 from utils.LoggerConfig import init_logger
 from utils.utils import create_memory_bank
+import numpy as np
 
 
 logger = init_logger()
@@ -33,8 +34,9 @@ class TrainAnomalyDetection:
         self.device = device if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def loaddateset(self):
-        # 数据预处理放在 preprocessing/data_preprocess.py 中。
-        # 每个 txt 采集文件先独立切 patch，再合并，避免跨文件窗口。
+        """
+        创建数据集
+        """
         data_path = self.base_dir.joinpath(self.date_dir)
         train_loader, train_patches = create_txt_patch_dataloader(
             data_path,
@@ -50,17 +52,19 @@ class TrainAnomalyDetection:
 
     def train(self):
         train_loader, train_patches = self.loaddateset()
+        # 创建模型
         model = PatchEncoder(in_channels=self.in_channels, use_revin=True).to(self.device)
         logger.info("Model initialized.")
         logger.info(model)
+        # 统计模型参数量
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         logger.info(f"Total params: {total_params:,}")
         logger.info(f"Trainable params: {trainable_params:,}")
-
+        # 创建 TensorBoard writer
         writer = SummaryWriter(self.log_dir)
 
-        # 使用全部正常 485 波形 patch 训练编码器。
+        # 训练模型
         train_model(
             model,
             train_loader,
@@ -77,16 +81,17 @@ class TrainAnomalyDetection:
         torch.jit.trace(
             model,
             torch.randn(1, self.in_channels, self.patch_size).to(self.device),
-        ).save("trained_encoder.pt")
+        ).save("./output/trained_model.pt")
 
         # 保存正常模式的 embedding，作为后续异常评分的参考库。
-        memory_bank, indices_tensor = create_memory_bank(model, train_loader, self.device, num_cores=0.0001)
+        memory_bank, indices_tensor = create_memory_bank(model, train_loader, self.device, num_cores=500)
         writer.add_embedding(memory_bank, metadata=indices_tensor, tag="memory_bank")
 
         t0 = time.time()
-        torch.save(memory_bank, "memory_bank.pth")
+        memory_bank =  memory_bank.detach().cpu().numpy()
+        np.save("./output/memory_bank.npy", memory_bank)
+        logger.info(f"Memory bank shape: {memory_bank.shape}, dtype: {memory_bank.dtype}")
         logger.info("Saved memory_bank in %.3f seconds", time.time() - t0)
-
         writer.close()
 
 

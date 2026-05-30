@@ -32,13 +32,13 @@ def create_memory_bank(model, data_loader, device, num_cores=None):
         return embeddings_tensor, indices_tensor
 
   
-    if isinstance(num_cores, float):
-        k = int(round(num_cores * num_samples))    
-    else:
-        k = int(num_cores)
-    # 记忆库至少500个
-    min_cores_eff = min(500, max(1, num_samples - 1)) 
-    num_cores = max(min_cores_eff, min(k, num_samples - 1))
+    # if isinstance(num_cores, float):
+    #     k = int(round(num_cores * num_samples))    
+    # else:
+    #     k = int(num_cores)
+    # # 记忆库至少500个
+    # min_cores_eff = min(500, max(1, num_samples - 1)) 
+    # num_cores = max(min_cores_eff, min(k, num_samples - 1))
 
     if num_cores >= num_samples:
         return embeddings_tensor, indices_tensor

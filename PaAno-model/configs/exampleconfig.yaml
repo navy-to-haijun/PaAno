@@ -1,10 +1,10 @@
 dataset:
   date_dir: "data/gooddata"
-  patch_size: 128
+  patch_size: 256
 
 model:
   log_dir: "run/data/"
   batch_size: 512
   in_channels: 1
-  num_iters: 50
+  num_iters: 2000
   lr: 1e-4

@@ -1,11 +1,14 @@
 dataset:
-  date_file: "data/data/waveform2.npz"
-  # date_file: "data/example/405_UCR_id_103_Sensor_tr_2827_1st_5988.csv"
+  date_file: "data/waveform_data"
+params:
   patch_size: 128
+  stride: 1
+  top_k: 3
+  in_channels: 1
 
 model:
-  log_dir: "run/data/"
-  batch_size: 512
-  in_channels: 1
-  num_iters: 200
-  lr: 1e-4
+  model_path: "output/trained_model.pt"
+  memory_bank_path: "output/memory_bank.npy"
+  
+output:
+  score_dir: "data/anomaly_scores"
