@@ -1,0 +1,139 @@
+import asyncio
+import threading
+import time
+import numpy as np
+
+
+# =====================================================
+# 双缓冲区
+# =====================================================
+
+BUFFER_SIZE = 10000
+
+buffers = [
+    np.empty(BUFFER_SIZE, dtype=np.float32),
+    np.empty(BUFFER_SIZE, dtype=np.float32),
+]
+
+buffer_lock = threading.Lock()
+
+latest_idx = 0
+frame_seq = 0
+
+
+# =====================================================
+# 推理结果
+# =====================================================
+
+result_lock = threading.Lock()
+
+latest_result = {
+    "score": None,
+    "infer_seq": 0,
+    "timestamp": 0,
+}
+
+
+# =====================================================
+# AcquireThread
+# =====================================================
+
+def acquire_thread():
+    """
+    示波器采集线程
+    """
+    global latest_idx
+    global frame_seq
+
+    while True:
+
+        # 写另一块buffer
+        with buffer_lock:
+            write_idx = latest_idx ^ 1
+
+        # ---------------------------------
+        # 实际采集
+        # pyvisa读取到 buffers[write_idx]
+        # ---------------------------------
+
+        acquire_waveform(buffers[write_idx])
+
+        # 发布新数据
+        with buffer_lock:
+            latest_idx = write_idx
+            frame_seq += 1
+
+
+# =====================================================
+# InferThread
+# =====================================================
+
+def infer_thread():
+    global latest_result
+
+    last_frame_seq = -1
+
+    while True:
+
+        # 获取最新buffer信息
+        with buffer_lock:
+            seq = frame_seq
+            idx = latest_idx
+
+        if seq == last_frame_seq:
+            time.sleep(0.001)
+            continue
+
+        # -----------------------------
+        # RKNN推理
+        # -----------------------------
+
+        score = infer(buffers[idx])
+
+        with result_lock:
+            latest_result["score"] = float(score)
+            latest_result["infer_seq"] = seq
+            latest_result["timestamp"] = time.time()
+
+        # 注意
+        # 处理完成后记录当前最新seq
+        # 中间产生的数据自动丢弃
+        last_frame_seq = seq
+
+
+async def websocket_sender():
+    """
+    将最新推理结果通过WebSocket发送给前端
+    """
+
+    while True:
+
+        with result_lock:
+            payload = latest_result.copy()
+
+        await send_websocket(payload)
+
+        await asyncio.sleep(0.05)  # 20Hz
+
+
+async def main():
+    """
+    创建2个线程 + WebSocket 协程
+    """
+    # 示波器采集线程
+    acquire_t = threading.Thread(target=acquire_thread, 
+                                      daemon=True, 
+                                      name="AcquireThread")
+    # 推理线程
+    infer_t = threading.Thread(target=infer_thread, 
+                                    daemon=True, 
+                                    name="InferThread")
+    # 启动线程
+    acquire_t.start()
+    infer_t.start()
+    # 启动WebSocket 协程
+    await websocket_sender()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

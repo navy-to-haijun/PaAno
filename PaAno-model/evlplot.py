@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 base_dir = Path(__file__).parent
 score_dir = base_dir / "data" / "anomaly_scores"
 
-csv_files = sorted(score_dir.glob("*_scores.csv"))
+csv_files = sorted(score_dir.glob("*_scores*.csv"))
 
 if not csv_files:
     print("没有找到csv文件")

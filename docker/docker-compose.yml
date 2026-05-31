@@ -1,5 +1,3 @@
-# 版本信息
-version: '1'
 # 服务：运行的容器
 services:
   rknn_dev:
@@ -21,6 +19,6 @@ services:
     working_dir: /workspace
     # 挂载目录
     volumes:
-      - E:/资料/智深/信号质量/PaAno:/workspace
+      - E:/资料/智深/信号质量:/workspace
 
     command: /bin/bash

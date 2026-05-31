@@ -1,0 +1,14 @@
+dataset:
+  date_file: "waveform_data"
+params:
+  patch_size: 256
+  stride: 1
+  top_k: 3
+  in_channels: 1
+
+model:
+  memory_bank_path: "output/memory_bank.npy"
+  rknn_model_path: "output/rk3588-PaAno.rknn"
+  
+output:
+  score_dir: "anomaly_scores"

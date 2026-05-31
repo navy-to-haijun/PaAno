@@ -1,7 +1,7 @@
 dataset:
   date_file: "data/waveform_data"
 params:
-  patch_size: 128
+  patch_size: 256
   stride: 1
   top_k: 3
   in_channels: 1
@@ -9,6 +9,7 @@ params:
 model:
   model_path: "output/trained_model.pt"
   memory_bank_path: "output/memory_bank.npy"
+  rknn_model_path: "output/rknn_model.rknn"
   
 output:
   score_dir: "data/anomaly_scores"

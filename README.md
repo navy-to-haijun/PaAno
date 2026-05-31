@@ -6,6 +6,59 @@
 
 github：[PaAno](https://github.com/jinnnju/PaAno)
 
+## 架构
+
+```
+               AcquireThread
+      │
+      ▼
+
+ queue.Queue(maxsize=2)
+
+      │
+      ▼
+
+ InferThread
+
+      │                   MainThread
+                        │
+                    asyncio
+                        │
+                        ▼
+
+                 WebSocketSender
+
+                        ▲
+                        │
+
+              infer_to_web
+             SimpleQueue()
+
+                        ▲
+                        │
+
+                  InferThread
+
+                        ▲
+                        │
+
+              acq_to_infer
+            Queue(maxsize=2)
+
+                        ▲
+                        │
+
+                 AcquireThread
+      ▼
+
+ queue.SimpleQueue()
+
+      │
+      ▼
+
+ asyncio WebSocket
+```
+
 
 
 ## PaAno算法
