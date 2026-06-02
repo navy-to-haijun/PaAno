@@ -66,7 +66,7 @@ class Oscilloscope:
                 (f":CHANnel{channel}:SCALe 2", "2.000000E+00"),       # 设置通道电压刻度为2V/div
                 (f":CHANnel{channel}:OFFSet 0", "0.000000E+00"),      # 设置通道的垂直偏移为0V
                 (f":TIMebase:MODE MAIN", "MAIN"),                     # 设置时间基准为MAIN YT模式
-                (f":TIMebase:SCALe 0.00001", "1.000000E-5"),            # 设置时间刻度为500us/div
+                (f":TIMebase:SCALe 0.000001", "1.000000E-6"),            # 设置时间刻度为500us/div
                 (f":TRIGger:MODE EDGE", "EDGE"),                     # 设置触发模式为边沿触发
                 (f":TRIGger:EDGE:SOURce CHAN{channel}", f"CHAN{channel}"),  # 设置触发源为通道1
                 (f":TRIGger:EDGE:LEVel 1", "1.000000E0"),        # 设置触发水平为1V
@@ -97,10 +97,10 @@ class Oscilloscope:
                 (f":WAV:SOUR CHAN{channel}", f"CHAN{channel}"),    # 设置通道
                 ("WAV:MODE RAW", "RAW"),                           # 设置读取数据模式: 读取内存中的波形数据(读取时需要停止示波器)      
                 ("WAV:FORM WORD", "WORD"),                         # 设置数据的返回格式：一个波形点占用2个字节
-                (f":ACQuire:MDEPth 10k", "1.0000E+04"),           # 设置波形深度(要求采样速率控制在20M) 
-                ("WAVeform:POINts 10000", "10000"),              # 设置波形点数
+                (f":ACQuire:MDEPth 1k", "1.0000E+03"),           # 设置波形深度(要求采样速率控制在20M) 
+                ("WAVeform:POINts 1000", "1000"),              # 设置波形点数
                 ("WAVeform:STARt 1", "1"),                         # 设置起始点
-                ("WAVeform:STOP 10000", "10000"),                # 设置结束点
+                ("WAVeform:STOP 1000", "1000"),                # 设置结束点
             ]
         
         # 顺序执行命令

@@ -1,5 +1,8 @@
+// 使用命令
+// python -m http.server 8080
+
 // 每个画布最多显示的点数，需要和示波器当前采样点数保持同一量级。
-const MAX_POINTS = 10000;
+const MAX_POINTS = 1000;
 
 function resize(canvas) {
   // 按设备像素比设置真实画布尺寸，避免高分屏下曲线模糊。
@@ -82,6 +85,9 @@ function parseFrame(buffer) {
   const voltageBytes = voltageLength * Float32Array.BYTES_PER_ELEMENT;
   const scoreBytes = scoreLength * Float32Array.BYTES_PER_ELEMENT;
   const expectedBytes = 8 + voltageBytes + scoreBytes;
+  // 打印
+  console.log(`expectedBytes: ${expectedBytes}`);
+
 
   if (buffer.byteLength < expectedBytes) {
     return null;
@@ -94,8 +100,9 @@ function parseFrame(buffer) {
   };
 }
 
-// 默认连接当前页面所在主机的 8765 端口，便于换设备 IP 后不用改代码。
-const wsHost = window.location.hostname || "127.0.0.1";
+
+const wsHost = "172.101.1.2";
+//const wsHost = "192.168.62.56";
 const ws = new WebSocket(`ws://${wsHost}:8765`);
 ws.binaryType = "arraybuffer";
 
@@ -105,6 +112,12 @@ ws.onmessage = (event) => {
   if (!frame) {
     return;
   }
+  // 显示最大最小值
+  const voltageMax = Math.max(...frame.voltage);
+  const voltageMin = Math.min(...frame.voltage);
+  const scoreMax = Math.max(...frame.scores);
+  const scoreMin = Math.min(...frame.scores);
+  console.log(`voltage: [${voltageMin.toFixed(2)}, ${voltageMax.toFixed(2)}], scores: [${scoreMin.toFixed(2)}, ${scoreMax.toFixed(2)}]`);
 
   drawArray(voltageView.line, frame.voltage, clampUnit);
   drawArray(scoreView.line, frame.scores, scaleScore);

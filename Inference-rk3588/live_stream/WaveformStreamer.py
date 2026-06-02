@@ -108,7 +108,10 @@ class WaveformStreamer:
             raise ValueError("推理结果帧缺少 scores 数据。")
 
         voltage_arr = self._prepare_voltage(voltage)
+        # score_arr = self._prepare_scores(scores)
+        # 开头和结尾各去掉10个点，避免 WebGL 曲线渲染时边界异常
         score_arr = np.ascontiguousarray(np.asarray(scores, dtype=np.float32).reshape(-1))
+        score_arr = score_arr[10:-10] if score_arr.size > 20 else score_arr
 
         # 每个电压采样点都应有一个对应的异常分数。
         if voltage_arr.size != score_arr.size:
@@ -124,7 +127,17 @@ class WaveformStreamer:
         """将原始电压转换为前端 WebGL 曲线使用的 float32 连续数组。"""
         voltage_arr = np.asarray(voltage, dtype=np.float32).reshape(-1)
         voltage_arr = np.clip(voltage_arr, -10.0, 10.0) / 15.0
+        # 开头和结尾各去掉10个点，避免 WebGL 曲线渲染时边界异常。
+        if voltage_arr.size > 20:
+            voltage_arr = voltage_arr[10:-10]
         return np.ascontiguousarray(voltage_arr)
+    @staticmethod
+    def _prepare_scores(scores) -> np.ndarray:
+        """将原始分数转换为前端 WebGL 曲线使用的 float32 连续数组。"""
+        score_arr = np.asarray(scores, dtype=np.float32).reshape(-1)
+        # 由[0,1] 缩放到 [-1.1]
+        score_arr = np.clip(score_arr, 0, 1) * 2 - 1
+        return np.ascontiguousarray(score_arr)
 
     async def serve(self, stop_event=None):
         """启动 WebSocket 服务，直到外部 stop_event 触发或服务退出。"""

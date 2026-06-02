@@ -225,6 +225,10 @@ class RKNNPaAnoInference:
             patch_scores = self.calculate_patch_scores(outputs, self.mb_normalized, self.top_k)
             # 计算点分数
             point_scores = self.distribute_patch_scores_to_points(patch_scores, self.patch_size)
+            # 分数 归一化到0-1
+            scrores_min = 0
+            scrores_max = 0.05
+            point_scores = (point_scores - scrores_min) / (scrores_max - scrores_min)
             return point_scores
             
         else:
