@@ -234,7 +234,7 @@ np.save("./output/memory_bank.npy", memory_bank)
 
 在PC端直接加载`trained_model.pt`进行推理
 
-![image-20260606234848033](attachments/pc推理.png)
+![PC推理](attachments/PC推理.png)
 
 由于使用的正常数据，因此分数均比较低，在帧开始和结束时有波动。
 
